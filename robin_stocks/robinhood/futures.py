@@ -257,11 +257,14 @@ def get_futures_order_info(order_id, account_id=None, info=None):
 def get_filled_futures_orders(account_id=None, info=None):
     """Get all filled futures orders with automatic pagination.
 
+    Includes both FILLED and PARTIALLY_FILLED_REST_CANCELLED orders
+    since partial fills represent actual executions.
+
     :param account_id: Futures account ID
     :type account_id: Optional[str]
     :param info: Will filter the results to get a specific value
     :type info: Optional[str]
-    :returns: List of filled orders
+    :returns: List of filled orders (including partial fills)
 
     """
     if account_id is None:
@@ -270,36 +273,20 @@ def get_filled_futures_orders(account_id=None, info=None):
             print("Error: Futures account ID is required.", file=get_output())
             return None
 
-    # Futures API uses cursor-based pagination
-    all_orders = []
-    cursor = None
-    page = 1
+    # Get all orders and filter for filled/partially filled
+    all_orders = get_all_futures_orders(account_id, info=None)
+    if not all_orders:
+        return []
 
-    update_session_for_futures()
+    # Include FILLED and PARTIALLY_FILLED_REST_CANCELLED
+    # Both represent actual executions that affect position
+    filled_orders = [
+        order for order in all_orders
+        if order.get('orderState') in ['FILLED', 'PARTIALLY_FILLED_REST_CANCELLED']
+           and int(order.get('filledQuantity', 0)) > 0
+    ]
 
-    while True:
-        payload = {'contractType': 'OUTRIGHT', 'orderState': 'FILLED'}
-        if cursor:
-            payload['cursor'] = cursor
-
-        url = futures_orders_url(account_id)
-        data = request_get(url, payload=payload)
-
-        if not data or 'results' not in data:
-            break
-
-        results = data['results']
-        all_orders.extend(results)
-
-        # Check for next page
-        cursor = data.get('next')
-        if not cursor:
-            break
-
-        print(f'Loading page {page + 1} ...', file=get_output())
-        page += 1
-
-    return filter_data(all_orders, info)
+    return filter_data(filled_orders, info)
 
 
 # P&L Helper Functions
